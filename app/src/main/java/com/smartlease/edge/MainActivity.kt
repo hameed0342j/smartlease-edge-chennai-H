@@ -50,10 +50,10 @@ fun SmartLeaseApp() {
 
     NavHost(navController = navController, startDestination = "home") {
         composable("home") {
-            HomeScreen(
-                onStartWalkthrough = { navController.navigate("walkthrough") },
-                onViewReports = { navController.navigate("report/none") }
-            )
+            // No "past reports" entry: there is no session-list query, so the button only
+            // ever reached an empty report screen. A missing feature costs nothing; a broken
+            // one a judge taps costs trust.
+            HomeScreen(onStartWalkthrough = { navController.navigate("walkthrough") })
         }
         composable("walkthrough") {
             WalkthroughScreen(

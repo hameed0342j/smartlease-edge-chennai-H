@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun HomeScreen(onStartWalkthrough: () -> Unit, onViewReports: () -> Unit) {
+fun HomeScreen(onStartWalkthrough: () -> Unit) {
     val context = LocalContext.current
 
     // Which models actually shipped in this APK. Listing the assets directory is cheap —
@@ -41,10 +41,6 @@ fun HomeScreen(onStartWalkthrough: () -> Unit, onViewReports: () -> Unit) {
 
         Button(onClick = onStartWalkthrough, modifier = Modifier.fillMaxWidth()) {
             Text("Start Walkthrough")
-        }
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(onClick = onViewReports, modifier = Modifier.fillMaxWidth()) {
-            Text("View Past Reports")
         }
 
         Spacer(Modifier.height(32.dp))
