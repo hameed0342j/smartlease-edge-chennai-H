@@ -27,6 +27,7 @@ import com.smartlease.edge.data.Severity
 import com.smartlease.edge.ir.CommonAcIrProfiles
 import com.smartlease.edge.ir.IrController
 import com.smartlease.edge.ocr.OcrEngine
+import com.smartlease.edge.report.InspectionReport
 import com.smartlease.edge.report.ReportGenerator
 import com.smartlease.edge.safety.SafetyGate
 import com.smartlease.edge.vision.DefectSegmenter
@@ -45,7 +46,7 @@ import java.util.UUID
  * inference, the tap recording and the PDF render are dispatched to Dispatchers.Default.
  */
 @Composable
-fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
+fun WalkthroughScreen(onReportGenerated: (InspectionReport) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -89,29 +90,30 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
         onDispose { arTracker.stop() }
     }
 
-    fun logFinding(type: FindingType, label: String) {
+    // Suspends until the row is committed. It used to fire-and-forget into scope.launch
+    // while "Generate Report" read the same table, so the last finding of a session could
+    // be missing from the PDF -- and from the digest computed over it.
+    suspend fun logFinding(type: FindingType, label: String) {
         val verdict = SafetyGate.evaluate(label)
         lastSafetyVerdict = verdict
         val severity = verdict.escalatedSeverity ?: Severity.INFO
         val suffix = if (verdict.reason != null) " -> " + verdict.reason else ""
         findingsLog = findingsLog + ("[" + type.name + "] " + label + suffix)
 
-        scope.launch {
-            try {
-                db.inspectionDao().insert(
-                    InspectionEntity(
-                        sessionId = sessionId,
-                        timestampEpochMillis = System.currentTimeMillis(),
-                        findingType = type,
-                        label = label,
-                        detailJson = "{}",
-                        severity = severity
-                    )
+        try {
+            db.inspectionDao().insert(
+                InspectionEntity(
+                    sessionId = sessionId,
+                    timestampEpochMillis = System.currentTimeMillis(),
+                    findingType = type,
+                    label = label,
+                    detailJson = "{}",
+                    severity = severity
                 )
-            } catch (e: Exception) {
-                // The finding is already on screen; losing the row must not kill the session.
-                findingsLog = findingsLog + "  (not saved: " + (e.message ?: e.javaClass.simpleName) + ")"
-            }
+            )
+        } catch (e: Exception) {
+            // The finding is already on screen; losing the row must not kill the session.
+            findingsLog = findingsLog + "  (not saved: " + (e.message ?: e.javaClass.simpleName) + ")"
         }
     }
 
@@ -253,20 +255,22 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
             }
 
             Button(enabled = !busy, onClick = {
-                val profile = CommonAcIrProfiles.profiles.first()
-                // NEC-family header timings. The demo unit's real burst has to be captured
-                // on-site with an external receiver -- ConsumerIrManager cannot receive IR
-                // (see IrController) -- so the label below never claims more than was done:
-                // the emitter fired, and nothing confirmed the appliance responded.
-                val necHeaderBurst = intArrayOf(9000, 4500, 560, 560, 560, 1690)
-                val result = irController.transmit(profile.typicalCarrierHz, necHeaderBurst)
-                val label = when (result) {
-                    is IrController.TransmitResult.Success ->
-                        "IR command transmitted — " + profile.brand + ", " +
-                                (profile.typicalCarrierHz / 1000) + " kHz (pattern not verified against this unit)"
-                    is IrController.TransmitResult.Failure -> "IR transmit failed: " + result.reason
+                scope.launch {
+                    val profile = CommonAcIrProfiles.profiles.first()
+                    // NEC-family header timings. The demo unit's real burst has to be captured
+                    // on-site with an external receiver -- ConsumerIrManager cannot receive IR
+                    // (see IrController) -- so the label below never claims more than was done:
+                    // the emitter fired, and nothing confirmed the appliance responded.
+                    val necHeaderBurst = intArrayOf(9000, 4500, 560, 560, 560, 1690)
+                    val result = irController.transmit(profile.typicalCarrierHz, necHeaderBurst)
+                    val label = when (result) {
+                        is IrController.TransmitResult.Success ->
+                            "IR command transmitted — " + profile.brand + ", " +
+                                    (profile.typicalCarrierHz / 1000) + " kHz (pattern not verified against this unit)"
+                        is IrController.TransmitResult.Failure -> "IR transmit failed: " + result.reason
+                    }
+                    logFinding(FindingType.IR_APPLIANCE_CHECK, label)
                 }
-                logFinding(FindingType.IR_APPLIANCE_CHECK, label)
             }) { Text(if (irController.hasIrBlaster) "Trigger AC (IR)" else "No IR blaster detected") }
         }
 
@@ -292,12 +296,15 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                     busy = true
                     try {
                         val findings = db.inspectionDao().findingsForSessionOnce(sessionId)
-                        // Digest, layout and file write, all off the UI thread.
-                        withContext(Dispatchers.Default) {
-                            val report = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
-                            ReportGenerator.renderToPdf(context, report)
+                        // Digest, layout and file write, all off the UI thread. Built once
+                        // here and handed upwards -- MainActivity used to re-query and
+                        // rebuild it, producing a second report object for the same session.
+                        val report = withContext(Dispatchers.Default) {
+                            val r = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
+                            ReportGenerator.renderToPdf(context, r)
+                            r
                         }
-                        onReportGenerated(sessionId)
+                        onReportGenerated(report)
                     } catch (e: Exception) {
                         findingsLog = findingsLog + "Report generation failed: " + (e.message ?: e.javaClass.simpleName)
                     } finally {

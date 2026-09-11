@@ -12,14 +12,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.smartlease.edge.data.AppDatabase
 import com.smartlease.edge.report.InspectionReport
-import com.smartlease.edge.report.ReportGenerator
 import com.smartlease.edge.ui.screens.HomeScreen
 import com.smartlease.edge.ui.screens.ReportScreen
 import com.smartlease.edge.ui.screens.WalkthroughScreen
 import com.smartlease.edge.ui.theme.SmartLeaseEdgeTheme
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -49,8 +46,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SmartLeaseApp() {
     val navController = rememberNavController()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
     var loadedReport by remember { mutableStateOf<InspectionReport?>(null) }
 
     NavHost(navController = navController, startDestination = "home") {
@@ -62,13 +57,12 @@ fun SmartLeaseApp() {
         }
         composable("walkthrough") {
             WalkthroughScreen(
-                onReportGenerated = { sessionId ->
-                    scope.launch {
-                        val db = AppDatabase.get(context)
-                        val findings = db.inspectionDao().findingsForSessionOnce(sessionId)
-                        loadedReport = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
-                        navController.navigate("report/$sessionId")
-                    }
+                // The report is already built and rendered by the time this fires. Re-querying
+                // and rebuilding it here produced a second report object for the same session,
+                // with a different generatedAt, for no benefit.
+                onReportGenerated = { report ->
+                    loadedReport = report
+                    navController.navigate("report/${report.sessionId}")
                 }
             )
         }
