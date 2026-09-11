@@ -1,19 +1,30 @@
 package com.smartlease.edge.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.smartlease.edge.report.FindingsDigest
 import com.smartlease.edge.report.InspectionReport
+import com.smartlease.edge.report.ReportGenerator
 
 @Composable
 fun ReportScreen(report: InspectionReport?, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var shareError by remember { mutableStateOf<String?>(null) }
+
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         TextButton(onClick = onBack) { Text("< Back") }
         Text("Inspection Report", fontWeight = FontWeight.Bold, fontSize = 22.sp)
@@ -54,6 +65,18 @@ fun ReportScreen(report: InspectionReport?, onBack: () -> Unit) {
                 )
             }
         }
+
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = { shareError = shareReport(context, report) },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("Share report (PDF)") }
+
+        shareError?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, fontSize = 11.sp)
+        }
+
         Spacer(Modifier.height(12.dp))
 
         LazyColumn {
@@ -67,5 +90,47 @@ fun ReportScreen(report: InspectionReport?, onBack: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Hand the rendered PDF to whatever the user picks. Before this existed the report was
+ * written to app-private storage with no provider and no intent, so the document the whole
+ * product is about could not reach either party.
+ *
+ * The digest goes in the message body as well as inside the PDF, so a recipient can compare
+ * the two without opening anything.
+ *
+ * @return null on success, or a message to show the user.
+ */
+private fun shareReport(
+    context: android.content.Context,
+    report: InspectionReport
+): String? {
+    val file = ReportGenerator.reportFile(context, report.sessionId)
+    if (!file.exists()) {
+        return "Report PDF not found — generate the report first."
+    }
+    return try {
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".reports", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(
+                Intent.EXTRA_SUBJECT,
+                "SmartLease Edge report — session ${report.sessionId.take(8)}"
+            )
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "SHA-256 of ${report.findingCount} finding(s): ${report.findingsSha256}"
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Share report").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+        null
+    } catch (e: Exception) {
+        "Could not share: ${e.message ?: e.javaClass.simpleName}"
     }
 }

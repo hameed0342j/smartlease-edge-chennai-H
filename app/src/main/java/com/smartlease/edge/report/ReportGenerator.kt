@@ -122,11 +122,22 @@ object ReportGenerator {
         drawFooter(canvas, report, pageNumber)
         document.finishPage(page)
 
-        val outFile = File(context.filesDir, "report_${report.sessionId}.pdf")
+        val outFile = reportFile(context, report.sessionId)
+        outFile.parentFile?.mkdirs()
         FileOutputStream(outFile).use { document.writeTo(it) }
         document.close()
         return outFile
     }
+
+    /**
+     * Reports live in their own subdirectory of filesDir, not in filesDir itself, so the
+     * FileProvider can be scoped to `reports/` — the copied 13.7 MB model asset sits beside
+     * them and must not be reachable through a shared URI.
+     */
+    const val REPORTS_DIR = "reports"
+
+    fun reportFile(context: Context, sessionId: String): File =
+        File(File(context.filesDir, REPORTS_DIR), "report_$sessionId.pdf")
 
     /**
      * Every page carries the digest, not just the last one — a report is argued over page by
