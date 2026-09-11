@@ -169,12 +169,16 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
 
             Button(enabled = !busy, onClick = {
                 val profile = CommonAcIrProfiles.profiles.first()
-                // Placeholder pattern. Day 12 of the plan replaces this with the real
-                // on-site captured burst for the actual demo AC unit.
-                val placeholderPattern = intArrayOf(9000, 4500, 560, 560, 560, 1690)
-                val result = irController.transmit(profile.typicalCarrierHz, placeholderPattern)
+                // NEC-family header timings. The demo unit's real burst has to be captured
+                // on-site with an external receiver -- ConsumerIrManager cannot receive IR
+                // (see IrController) -- so the label below never claims more than was done:
+                // the emitter fired, and nothing confirmed the appliance responded.
+                val necHeaderBurst = intArrayOf(9000, 4500, 560, 560, 560, 1690)
+                val result = irController.transmit(profile.typicalCarrierHz, necHeaderBurst)
                 val label = when (result) {
-                    is IrController.TransmitResult.Success -> "IR transmit OK (" + profile.brand + " profile, placeholder pattern, replace with Day 12 capture)"
+                    is IrController.TransmitResult.Success ->
+                        "IR command transmitted — " + profile.brand + ", " +
+                                (profile.typicalCarrierHz / 1000) + " kHz (pattern not verified against this unit)"
                     is IrController.TransmitResult.Failure -> "IR transmit failed: " + result.reason
                 }
                 logFinding(FindingType.IR_APPLIANCE_CHECK, label)
@@ -212,6 +216,6 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                 }
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Generate Signed Report") }
+        ) { Text("Generate Report") }
     }
 }
