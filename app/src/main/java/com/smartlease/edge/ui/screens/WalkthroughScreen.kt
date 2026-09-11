@@ -96,7 +96,12 @@ fun WalkthroughScreen(onReportGenerated: (InspectionReport) -> Unit) {
     suspend fun logFinding(type: FindingType, label: String) {
         val verdict = SafetyGate.evaluate(label)
         lastSafetyVerdict = verdict
-        val severity = verdict.escalatedSeverity ?: Severity.INFO
+        // The gate only ever returns STOP_ESCALATE or nothing, so without this every visual
+        // defect was filed INFO and Severity.NOTABLE was unreachable by any code path -- the
+        // severity column in the report was decoration. A defect finding is NOTABLE; the
+        // hazard gate still overrides it upwards and nothing overrides it downwards.
+        val severity = verdict.escalatedSeverity
+            ?: if (type == FindingType.VISUAL_DEFECT) Severity.NOTABLE else Severity.INFO
         val suffix = if (verdict.reason != null) " -> " + verdict.reason else ""
         findingsLog = findingsLog + ("[" + type.name + "] " + label + suffix)
 
@@ -164,7 +169,20 @@ fun WalkthroughScreen(onReportGenerated: (InspectionReport) -> Unit) {
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { arTracker.captureBaseline() }) { Text("Set Baseline") }
+            OutlinedButton(onClick = {
+                arTracker.captureBaseline()
+                // Recorded so the report shows a baseline was set and when. FindingType
+                // .AR_BASELINE_ALIGNMENT was declared and never emitted by any code path.
+                scope.launch {
+                    val s = alignmentState
+                    val pose = if (s == null) "pose unavailable"
+                    else "pitch " + s.pitchDeg.toInt() + ", roll " + s.rollDeg.toInt()
+                    logFinding(
+                        FindingType.AR_BASELINE_ALIGNMENT,
+                        "Baseline pose recorded (" + pose + "). Held in memory for this session only."
+                    )
+                }
+            }) { Text("Set Baseline") }
 
             // Gated on the permission, not just on `busy`: without CAMERA the PreviewView
             // below is never composed, so bindTo() never runs and captureBitmap() throws
