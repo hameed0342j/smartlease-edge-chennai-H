@@ -44,7 +44,9 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
-    val sessionId = remember { UUID.randomUUID().toString().take(8) }
+    // Full UUID, not the first 8 hex characters. The session ID goes into the digest and
+    // onto the report; 32 bits of client-generated identifier is not an identifier.
+    val sessionId = remember { UUID.randomUUID().toString() }
     val cameraController = remember { CameraController(context, lifecycleOwner) }
     val arTracker = remember { ArAlignmentTracker(context) }
     val irController = remember { IrController(context) }
@@ -93,7 +95,7 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Walkthrough - session $sessionId", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Walkthrough - session ${sessionId.take(8)}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(Modifier.height(8.dp))
 
         if (hasCameraPermission) {

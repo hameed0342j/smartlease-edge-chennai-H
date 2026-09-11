@@ -7,5 +7,8 @@ data class InspectionReport(
     val generatedAtEpochMillis: Long,
     val propertyLabel: String,
     val sections: List<ReportSection>,
-    val overallVerdict: String
+    val overallVerdict: String,
+    /** Lowercase hex SHA-256 over the canonical findings — see [FindingsDigest]. */
+    val findingsSha256: String,
+    val findingCount: Int
 )

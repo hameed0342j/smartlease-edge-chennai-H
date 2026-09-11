@@ -15,17 +15,18 @@ import java.util.Locale
 
 /**
  * Local, offline PDF report generator using Android's built-in PdfDocument API — no
- * network call, no cloud service, at any point in this file. This is the "signed,
- * timestamped local report" from the architecture doc: "signed" here means a visible
- * timestamp + session ID baked into the document, not a cryptographic signature — the
- * design doc explicitly calls out dropping real crypto-signing as unnecessary complexity
- * for a demo, and that decision is carried through here.
+ * network call, no cloud service, at any point in this file.
  *
- * The natural-language synthesis step (turning structured findings into readable prose)
- * is the one piece meant to eventually call Qualcomm's GenieX/Llama-3.2 runtime on-device;
- * `synthesizeNarrative()` below is a rule-based placeholder for that step, clearly marked,
- * so the report pipeline is fully runnable end-to-end today while the real GenieX
- * integration is layered in without touching the PDF-rendering code at all.
+ * What "tamper-evident" means here, exactly: every page carries a SHA-256 over the
+ * canonical findings ([FindingsDigest]). Change one character of one finding and the
+ * digest no longer matches, so a regenerated report is detectably a different report.
+ * That is the whole of the claim. It is NOT a signature: nothing here proves who recorded
+ * the findings, nothing binds a person to them, and the timestamp is
+ * `System.currentTimeMillis()`, which a user can move. Two on-screen signature captures
+ * rendered below the digest are the next step; until they exist, do not say "signed".
+ *
+ * `synthesizeNarrative()` is rule-based templating. It is not an LLM and the report does
+ * not claim it is.
  */
 object ReportGenerator {
 
@@ -53,7 +54,9 @@ object ReportGenerator {
             generatedAtEpochMillis = System.currentTimeMillis(),
             propertyLabel = propertyLabel,
             sections = sections,
-            overallVerdict = verdict
+            overallVerdict = verdict,
+            findingsSha256 = FindingsDigest.sha256Hex(sessionId, findings),
+            findingCount = findings.size
         )
     }
 
@@ -96,7 +99,8 @@ object ReportGenerator {
         canvas.drawText("Verdict: ${report.overallVerdict}", MARGIN.toFloat(), y, headerPaint); y += 26
 
         for (section in report.sections) {
-            if (y > PAGE_HEIGHT - 100) {
+            if (y > PAGE_HEIGHT - 120) {
+                drawFooter(canvas, report, pageNumber)
                 document.finishPage(page)
                 pageNumber++
                 page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
@@ -115,11 +119,40 @@ object ReportGenerator {
             y += layout.height + 16
         }
 
+        drawFooter(canvas, report, pageNumber)
         document.finishPage(page)
 
         val outFile = File(context.filesDir, "report_${report.sessionId}.pdf")
         FileOutputStream(outFile).use { document.writeTo(it) }
         document.close()
         return outFile
+    }
+
+    /**
+     * Every page carries the digest, not just the last one — a report is argued over page by
+     * page, and a footer that appears once is a footer that can be removed.
+     */
+    private fun drawFooter(canvas: Canvas, report: InspectionReport, pageNumber: Int) {
+        val footPaint = Paint().apply { textSize = 7.5f; color = 0xFF555555.toInt() }
+        val rulePaint = Paint().apply { color = 0xFFCCCCCC.toInt(); strokeWidth = 0.5f }
+        var y = (PAGE_HEIGHT - 38).toFloat()
+
+        canvas.drawLine(MARGIN.toFloat(), y, (PAGE_WIDTH - MARGIN).toFloat(), y, rulePaint)
+        y += 11
+        canvas.drawText(
+            "SHA-256 of ${report.findingCount} finding(s): ${report.findingsSha256}",
+            MARGIN.toFloat(), y, footPaint
+        )
+        y += 10
+        canvas.drawText(
+            "Verifies that the findings above are unaltered. Not a signature: it does not " +
+                    "identify who recorded them.",
+            MARGIN.toFloat(), y, footPaint
+        )
+        y += 10
+        canvas.drawText(
+            "Session ${report.sessionId}   ·   page $pageNumber",
+            MARGIN.toFloat(), y, footPaint
+        )
     }
 }
