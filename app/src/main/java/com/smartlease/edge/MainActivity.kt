@@ -30,11 +30,11 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestMultiplePermissions()
         ) { /* handled by re-composition reading ContextCompat.checkSelfPermission */ }
 
+        // Only what the app uses. Location was requested here and never read.
         permissionLauncher.launch(
             arrayOf(
                 Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.ACCESS_FINE_LOCATION
+                Manifest.permission.RECORD_AUDIO
             )
         )
 
