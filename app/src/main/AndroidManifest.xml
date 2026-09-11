@@ -38,14 +38,6 @@
             </intent-filter>
         </activity>
 
-        <!-- PyTorch model bench: loads vision_best.ptl / acoustic_cnn.ptl directly and
-             reports raw tensor shapes. Kept as a developer/demo surface for validating the
-             trained models on-device; not the product entry point. -->
-        <activity
-            android:name="com.iqoo.multimodal.MainActivity"
-            android:exported="false"
-            android:label="Model Bench"
-            android:screenOrientation="portrait" />
     </application>
 
 </manifest>
