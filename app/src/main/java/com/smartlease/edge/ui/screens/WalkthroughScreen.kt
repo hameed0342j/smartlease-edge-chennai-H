@@ -74,16 +74,21 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
         findingsLog = findingsLog + ("[" + type.name + "] " + label + suffix)
 
         scope.launch {
-            db.inspectionDao().insert(
-                InspectionEntity(
-                    sessionId = sessionId,
-                    timestampEpochMillis = System.currentTimeMillis(),
-                    findingType = type,
-                    label = label,
-                    detailJson = "{}",
-                    severity = severity
+            try {
+                db.inspectionDao().insert(
+                    InspectionEntity(
+                        sessionId = sessionId,
+                        timestampEpochMillis = System.currentTimeMillis(),
+                        findingType = type,
+                        label = label,
+                        detailJson = "{}",
+                        severity = severity
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                // The finding is already on screen; losing the row must not kill the session.
+                findingsLog = findingsLog + "  (not saved: " + (e.message ?: e.javaClass.simpleName) + ")"
+            }
         }
     }
 
@@ -96,7 +101,15 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                 factory = { ctx -> PreviewView(ctx) },
                 modifier = Modifier.fillMaxWidth().height(240.dp),
                 update = { previewView ->
-                    scope.launch { cameraController.bindTo(previewView) }
+                    scope.launch {
+                        try {
+                            cameraController.bindTo(previewView)
+                        } catch (e: Exception) {
+                            // Another app holding the camera would otherwise crash the
+                            // walkthrough the moment this screen composes.
+                            findingsLog = findingsLog + "Camera unavailable: " + (e.message ?: e.javaClass.simpleName)
+                        }
+                    }
                 }
             )
         } else {
@@ -119,12 +132,22 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { arTracker.captureBaseline() }) { Text("Set Baseline") }
 
-            Button(enabled = !busy, onClick = {
+            // Gated on the permission, not just on `busy`: without CAMERA the PreviewView
+            // below is never composed, so bindTo() never runs and captureBitmap() throws
+            // IllegalStateException into a coroutine with nothing to catch it.
+            Button(enabled = !busy && hasCameraPermission, onClick = {
                 scope.launch {
                     busy = true
                     try {
                         val bitmap = cameraController.captureBitmap()
-                        val text = OcrEngine.readText(bitmap)
+                        val text = try {
+                            OcrEngine.readText(bitmap)
+                        } catch (e: Exception) {
+                            // OcrEngine resumes with the exception on ML Kit failure. A failed
+                            // text read must not take the capture -- or the walkthrough -- down.
+                            findingsLog = findingsLog + "OCR unavailable: " + (e.message ?: "unknown error")
+                            ""
+                        }
                         if (text.isNotBlank()) {
                             logFinding(FindingType.OCR_TEXT_READ, text.take(120))
                         }
@@ -143,11 +166,13 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                         if (defects.isEmpty() && text.isBlank()) {
                             findingsLog = findingsLog + "Capture: nothing flagged"
                         }
+                    } catch (e: Exception) {
+                        findingsLog = findingsLog + "Capture failed: " + (e.message ?: e.javaClass.simpleName)
                     } finally {
                         busy = false
                     }
                 }
-            }) { Text("Capture + Analyze") }
+            }) { Text(if (hasCameraPermission) "Capture + Analyze" else "Camera permission needed") }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -161,6 +186,9 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                             FindingType.ACOUSTIC_TAP,
                             result.verdict.toString() + " (" + result.confidenceNote + ")"
                         )
+                    } catch (e: Exception) {
+                        // AudioRecord construction throws if the mic is held by another app.
+                        findingsLog = findingsLog + "Tap test failed: " + (e.message ?: e.javaClass.simpleName)
                     } finally {
                         busy = false
                     }
@@ -210,6 +238,8 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                         val report = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
                         ReportGenerator.renderToPdf(context, report)
                         onReportGenerated(sessionId)
+                    } catch (e: Exception) {
+                        findingsLog = findingsLog + "Report generation failed: " + (e.message ?: e.javaClass.simpleName)
                     } finally {
                         busy = false
                     }
