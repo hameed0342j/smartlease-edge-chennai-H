@@ -29,14 +29,20 @@ import com.smartlease.edge.ir.IrController
 import com.smartlease.edge.ocr.OcrEngine
 import com.smartlease.edge.report.ReportGenerator
 import com.smartlease.edge.safety.SafetyGate
+import com.smartlease.edge.vision.DefectSegmenter
 import com.smartlease.edge.vision.DefectSegmenterFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
- * The main demo screen. Walks through every subsystem from the design docs in one flow:
- * AR alignment status, capture plus OCR, capture plus vision segmenter, acoustic tap test,
- * IR transmit, safety-gated findings feed, then generate a signed local report.
+ * The main demo screen. Walks through every subsystem in one flow: pose baseline, capture
+ * plus OCR, capture plus vision segmenter, acoustic tap test, IR transmit, safety-gated
+ * findings feed, then generate a timestamped local report with a SHA-256 of its findings.
+ *
+ * Nothing heavy runs on the main thread: the two models load in a LaunchedEffect, and every
+ * inference, the tap recording and the PDF render are dispatched to Dispatchers.Default.
  */
 @Composable
 fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
@@ -50,15 +56,30 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
     val cameraController = remember { CameraController(context, lifecycleOwner) }
     val arTracker = remember { ArAlignmentTracker(context) }
     val irController = remember { IrController(context) }
-    val visionSegmenter = remember { DefectSegmenterFactory.create(context) }
-    // null when no trained model ships -- classify() then keeps the heuristic
-    val trainedTapModel = remember { TrainedTapClassifier.create(context) }
     val db = remember { AppDatabase.get(context) }
+
+    // Loaded off the main thread by the LaunchedEffect below, not in remember { }.
+    // DefectSegmenterFactory.create copies a 13.7 MB asset on first run and then parses a
+    // TorchScript module; TrainedTapClassifier.create parses a 73 KB JSON carrying a
+    // 10,280-float mel filterbank. Both used to happen during composition, which froze the
+    // screen for seconds the first time anyone opened it.
+    var visionSegmenter by remember { mutableStateOf<DefectSegmenter?>(null) }
+    var trainedTapModel by remember { mutableStateOf<TrainedTapClassifier?>(null) }
+    var modelsLoading by remember { mutableStateOf(true) }
 
     var alignmentState by remember { mutableStateOf<ArAlignmentTracker.AlignmentState?>(null) }
     var findingsLog by remember { mutableStateOf(listOf<String>()) }
     var lastSafetyVerdict by remember { mutableStateOf<SafetyGate.Verdict?>(null) }
     var busy by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val segmenter = withContext(Dispatchers.Default) { DefectSegmenterFactory.create(context) }
+        // null when no trained model ships -- classify() then keeps the heuristic
+        val tap = withContext(Dispatchers.Default) { TrainedTapClassifier.create(context) }
+        visionSegmenter = segmenter
+        trainedTapModel = tap
+        modelsLoading = false
+    }
 
     val hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     val hasMicPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -122,6 +143,15 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
             }
         }
 
+        if (modelsLoading) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.height(14.dp).width(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Loading models...", fontSize = 12.sp)
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         alignmentState?.let { s ->
             val statusText = if (s.deltaFromBaselineDeg == null)
@@ -137,10 +167,11 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
             // Gated on the permission, not just on `busy`: without CAMERA the PreviewView
             // below is never composed, so bindTo() never runs and captureBitmap() throws
             // IllegalStateException into a coroutine with nothing to catch it.
-            Button(enabled = !busy && hasCameraPermission, onClick = {
+            Button(enabled = !busy && !modelsLoading && hasCameraPermission, onClick = {
                 scope.launch {
                     busy = true
                     try {
+                        val segmenter = visionSegmenter ?: return@launch
                         val bitmap = cameraController.captureBitmap()
                         val text = try {
                             OcrEngine.readText(bitmap)
@@ -153,10 +184,14 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                         if (text.isNotBlank()) {
                             logFinding(FindingType.OCR_TEXT_READ, text.take(120))
                         }
-                        val defects = visionSegmenter.segmentDefects(bitmap, frameWidthInches = 48f, frameHeightInches = 36f)
+                        // 640x640 forward pass plus an 8400-anchor decode. On the main thread
+                        // this was hundreds of milliseconds of frozen UI per capture.
+                        val defects = withContext(Dispatchers.Default) {
+                            segmenter.segmentDefects(bitmap, frameWidthInches = 48f, frameHeightInches = 36f)
+                        }
                         // Label reflects which segmenter actually ran: a heuristic result must
                         // never read like a model detection in the tenant-facing report.
-                        val mode = if (visionSegmenter.isTrainedModel) "YOLOv8n-Seg" else "heuristic"
+                        val mode = if (segmenter.isTrainedModel) "YOLOv8n-Seg" else "heuristic"
                         defects.forEach { d ->
                             val areaStr = "%.2f".format(d.areaSqFtEstimate)
                             val confStr = "%.0f".format(d.confidence * 100f)
@@ -174,16 +209,28 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                         busy = false
                     }
                 }
-            }) { Text(if (hasCameraPermission) "Capture + Analyze" else "Camera permission needed") }
+            }) {
+                Text(
+                    when {
+                        !hasCameraPermission -> "Camera permission needed"
+                        modelsLoading -> "Loading..."
+                        else -> "Capture + Analyze"
+                    }
+                )
+            }
         }
 
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy && hasMicPermission, onClick = {
+            Button(enabled = !busy && !modelsLoading && hasMicPermission, onClick = {
                 scope.launch {
                     busy = true
                     try {
-                        val result = AcousticTapClassifier.recordAndClassifyOneTap(trained = trainedTapModel)
+                        // 1.2 s of blocking AudioRecord reads plus a 4096-point FFT. This ran
+                        // on the main thread and froze the UI for the whole recording.
+                        val result = withContext(Dispatchers.Default) {
+                            AcousticTapClassifier.recordAndClassifyOneTap(trained = trainedTapModel)
+                        }
                         logFinding(
                             FindingType.ACOUSTIC_TAP,
                             result.verdict.toString() + " (" + result.confidenceNote + ")"
@@ -195,7 +242,15 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                         busy = false
                     }
                 }
-            }) { Text(if (hasMicPermission) "Tap Test (1.2s)" else "Mic permission needed") }
+            }) {
+                Text(
+                    when {
+                        !hasMicPermission -> "Mic permission needed"
+                        modelsLoading -> "Loading..."
+                        else -> "Tap Test (1.2s)"
+                    }
+                )
+            }
 
             Button(enabled = !busy, onClick = {
                 val profile = CommonAcIrProfiles.profiles.first()
@@ -237,8 +292,11 @@ fun WalkthroughScreen(onReportGenerated: (String) -> Unit) {
                     busy = true
                     try {
                         val findings = db.inspectionDao().findingsForSessionOnce(sessionId)
-                        val report = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
-                        ReportGenerator.renderToPdf(context, report)
+                        // Digest, layout and file write, all off the UI thread.
+                        withContext(Dispatchers.Default) {
+                            val report = ReportGenerator.buildReport(sessionId, "Demo Property, Chennai", findings)
+                            ReportGenerator.renderToPdf(context, report)
+                        }
                         onReportGenerated(sessionId)
                     } catch (e: Exception) {
                         findingsLog = findingsLog + "Report generation failed: " + (e.message ?: e.javaClass.simpleName)
