@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import com.smartlease.edge.report.InspectionReport
 import com.smartlease.edge.ui.screens.HomeScreen
 import com.smartlease.edge.ui.screens.ReportScreen
+import com.smartlease.edge.ui.screens.SelfTestScreen
 import com.smartlease.edge.ui.screens.TapCaptureScreen
 import com.smartlease.edge.ui.screens.WalkthroughScreen
 import com.smartlease.edge.ui.theme.SmartLeaseEdgeTheme
@@ -56,6 +57,7 @@ fun SmartLeaseApp() {
             // one a judge taps costs trust.
             HomeScreen(
                 onStartWalkthrough = { navController.navigate("walkthrough") },
+                onOpenSelfTest = { navController.navigate("selftest") },
                 onOpenTapCapture =
                     if (BuildConfig.DEBUG) ({ navController.navigate("tapcapture") }) else null
             )
@@ -64,6 +66,11 @@ fun SmartLeaseApp() {
             composable("tapcapture") {
                 TapCaptureScreen(onBack = { navController.popBackStack() })
             }
+        }
+        // Ships in release on purpose: the judging handset is a loaner and there may be
+        // no cable, no laptop and no adb at the venue.
+        composable("selftest") {
+            SelfTestScreen(onBack = { navController.popBackStack() })
         }
         composable("walkthrough") {
             WalkthroughScreen(
