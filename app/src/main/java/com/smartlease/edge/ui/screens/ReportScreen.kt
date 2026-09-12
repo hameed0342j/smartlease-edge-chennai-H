@@ -1,6 +1,7 @@
 package com.smartlease.edge.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.smartlease.edge.report.FindingsDigest
 import com.smartlease.edge.report.InspectionReport
+import com.smartlease.edge.report.QrCode
 import com.smartlease.edge.report.ReportGenerator
 
 @Composable
@@ -53,7 +56,25 @@ fun ReportScreen(report: InspectionReport?, onBack: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
+
+                // Scannable by any phone's stock camera app: no install, no network. The
+                // hex below it is the same string, so it can be checked either way.
+                val qr = remember(report.findingsSha256) {
+                    runCatching { QrCode.bitmap(report.findingsSha256, 512).asImageBitmap() }
+                        .getOrNull()
+                }
+                if (qr != null) {
+                    Image(
+                        bitmap = qr,
+                        contentDescription = "QR code of the findings digest",
+                        modifier = Modifier.size(200.dp)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("Scan to read this digest on another phone.", fontSize = 10.sp)
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 Text(FindingsDigest.grouped(report.findingsSha256), fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(report.findingsSha256, fontSize = 9.sp)

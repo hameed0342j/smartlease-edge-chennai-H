@@ -119,6 +119,17 @@ object ReportGenerator {
             y += layout.height + 16
         }
 
+        // Verification block on the last page: the same digest as a scannable symbol.
+        if (y > PAGE_HEIGHT - 260) {
+            drawFooter(canvas, report, pageNumber)
+            document.finishPage(page)
+            pageNumber++
+            page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
+            canvas = page.canvas
+            y = MARGIN.toFloat()
+        }
+        drawVerificationBlock(canvas, report, y)
+
         drawFooter(canvas, report, pageNumber)
         document.finishPage(page)
 
@@ -138,6 +149,42 @@ object ReportGenerator {
 
     fun reportFile(context: Context, sessionId: String): File =
         File(File(context.filesDir, REPORTS_DIR), "report_$sessionId.pdf")
+
+    /**
+     * The last page carries the digest as a QR as well as as hex, so the other party can
+     * scan it with a stock camera app and hold the same commitment without trusting this
+     * document, this app, or us.
+     */
+    private fun drawVerificationBlock(canvas: Canvas, report: InspectionReport, top: Float) {
+        val headPaint = TextPaint().apply { textSize = 12f; isFakeBoldText = true }
+        val bodyPaint = TextPaint().apply { textSize = 8.5f; color = 0xFF333333.toInt() }
+        var y = top
+
+        canvas.drawText("Verify this report", MARGIN.toFloat(), y, headPaint); y += 16
+
+        val qr = runCatching { QrCode.bitmap(report.findingsSha256, 160) }.getOrNull()
+        if (qr != null) {
+            canvas.drawBitmap(qr, null, android.graphics.Rect(MARGIN, y.toInt(), MARGIN + 160, y.toInt() + 160), null)
+            val tx = (MARGIN + 175).toFloat()
+            var ty = y + 14
+            for (line in listOf(
+                "Scan with any phone camera. No app, no internet.",
+                "It reads back the SHA-256 of the ${report.findingCount} finding(s) in this report:",
+                "",
+                report.findingsSha256.substring(0, 32),
+                report.findingsSha256.substring(32),
+                "",
+                "If a finding is altered and the report regenerated,",
+                "this code changes. It proves the findings are unaltered;",
+                "it does not identify who recorded them."
+            )) {
+                canvas.drawText(line, tx, ty, bodyPaint); ty += 12
+            }
+            y += 168
+        } else {
+            canvas.drawText(report.findingsSha256, MARGIN.toFloat(), y, bodyPaint); y += 14
+        }
+    }
 
     /**
      * Every page carries the digest, not just the last one — a report is argued over page by

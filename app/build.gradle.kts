@@ -76,6 +76,9 @@ dependencies {
 
     implementation(libs.mlkit.text.recognition)
 
+    // QR rendering of the findings digest (ReportScreen + last PDF page)
+    implementation(libs.zxing.core)
+
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
