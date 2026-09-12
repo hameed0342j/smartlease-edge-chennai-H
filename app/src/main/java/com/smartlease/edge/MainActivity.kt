@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import com.smartlease.edge.report.InspectionReport
 import com.smartlease.edge.ui.screens.HomeScreen
 import com.smartlease.edge.ui.screens.ReportScreen
+import com.smartlease.edge.ui.screens.TapCaptureScreen
 import com.smartlease.edge.ui.screens.WalkthroughScreen
 import com.smartlease.edge.ui.theme.SmartLeaseEdgeTheme
 
@@ -53,7 +54,16 @@ fun SmartLeaseApp() {
             // No "past reports" entry: there is no session-list query, so the button only
             // ever reached an empty report screen. A missing feature costs nothing; a broken
             // one a judge taps costs trust.
-            HomeScreen(onStartWalkthrough = { navController.navigate("walkthrough") })
+            HomeScreen(
+                onStartWalkthrough = { navController.navigate("walkthrough") },
+                onOpenTapCapture =
+                    if (BuildConfig.DEBUG) ({ navController.navigate("tapcapture") }) else null
+            )
+        }
+        if (BuildConfig.DEBUG) {
+            composable("tapcapture") {
+                TapCaptureScreen(onBack = { navController.popBackStack() })
+            }
         }
         composable("walkthrough") {
             WalkthroughScreen(

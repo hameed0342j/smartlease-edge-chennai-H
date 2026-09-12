@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun HomeScreen(onStartWalkthrough: () -> Unit) {
+fun HomeScreen(onStartWalkthrough: () -> Unit, onOpenTapCapture: (() -> Unit)? = null) {
     val context = LocalContext.current
 
     // Which models actually shipped in this APK. Listing the assets directory is cheap —
@@ -41,6 +41,14 @@ fun HomeScreen(onStartWalkthrough: () -> Unit) {
 
         Button(onClick = onStartWalkthrough, modifier = Modifier.fillMaxWidth()) {
             Text("Start Walkthrough")
+        }
+
+        // Debug builds only: MainActivity passes null in release, so this never renders.
+        onOpenTapCapture?.let { open ->
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = open, modifier = Modifier.fillMaxWidth()) {
+                Text("Tap capture (debug)")
+            }
         }
 
         Spacer(Modifier.height(32.dp))

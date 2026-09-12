@@ -6,4 +6,6 @@
 -->
 <paths>
     <files-path name="reports" path="reports/" />
+    <!-- debug-only: zipped training-data captures leaving via the share sheet -->
+    <files-path name="exports" path="exports/" />
 </paths>

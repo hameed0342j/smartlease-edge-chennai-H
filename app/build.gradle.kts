@@ -41,6 +41,9 @@ android {
     }
     buildFeatures {
         compose = true
+        // Needed for BuildConfig.DEBUG, which gates the training-data capture screen out
+        // of release builds. AGP does not generate BuildConfig unless asked.
+        buildConfig = true
     }
 
     androidResources {
