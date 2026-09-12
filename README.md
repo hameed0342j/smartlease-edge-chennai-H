@@ -142,7 +142,7 @@ workspace root for the full ledger, and `METRICS.md` for the first recorded visi
 - **Zero hard negatives.** Not one of the 2,106 training images is free of defects, so the
   model has never seen a clean wall and its false-positive rate is unmeasured.
 - **The acoustic model is trained on 15 taps from 8 recordings.** 80% grouped-LOGO accuracy,
-  95% CI 62–96%, against a 53% majority baseline. Honest, and not yet a result.
+  95% CI 55–93%, against a 53% majority baseline. The lower bound is chance, so this is honest reporting of a number that is not yet a result.
 - **No on-device latency measurement exists.** 21.8 ms/image on a desktop CPU is a bound,
   not an app number.
 

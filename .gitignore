@@ -157,3 +157,7 @@ ml/YOLOV8/runs/
 # toolchain is pinned deliberately (see tag demo-known-good); do not let a sync move it.
 .idea/
 gradle/gradle-daemon-jvm.properties
+
+# Exclude zip archives and share bundles
+*.zip
+smartlease_share/
